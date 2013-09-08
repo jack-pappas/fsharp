@@ -155,6 +155,26 @@ namespace Microsoft.FSharp.Collections
                             e2.Dispose()
               }
 
+      let map3 f (e1 : IEnumerator<_>) (e2 : IEnumerator<_>) (e3 : IEnumerator<_>) : IEnumerator<_>=
+          upcast 
+              {  new MapEnumerator<_>() with
+                     member this.DoMoveNext curr = 
+                        let n1 = e1.MoveNext()
+                        let n2 = e2.MoveNext()
+                        let n3 = e3.MoveNext()
+                        if n1 && n2 && n3 then
+                           curr <- f e1.Current e2.Current e3.Current
+                           true
+                        else 
+                           false
+                     member this.Dispose() = 
+                        try 
+                            e1.Dispose() 
+                        finally
+                            e2.Dispose()
+                            e3.Dispose()
+              }
+
 
       let choose f (e : IEnumerator<'T>) = 
           let started = ref false 
@@ -857,63 +877,233 @@ namespace Microsoft.FSharp.Collections
         [<CompiledName("Initialize")>]
         let init count f =
             if count < 0 then invalidArg "count" (SR.GetString(SR.inputMustBeNonNegative))
-            mkSeq (fun () -> IEnumerator.upto (Some (count-1)) f)
+            elif count = 0 then empty
+            else mkSeq (fun () -> IEnumerator.upto (Some (count-1)) f)
 
         [<CompiledName("Iterate")>]
         let iter f (source : seq<'T>) = 
             checkNonNull "source" source
-            use e = source.GetEnumerator()
-            while e.MoveNext() do
-                f e.Current;
+
+            match source with
+            | :? ('T[]) as src ->
+                // Array.iter f src
+                for i = 0 to src.Length - 1 do
+                    f src.[i]
+            | :? ('T list) as src ->
+                List.iter f src
+            | :? IList<'T> as src ->
+                let len = src.Count
+                for i = 0 to len - 1 do
+                    f src.[i]
+            
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                let len = src.Count
+                for i = 0 to len - 1 do
+                    f src.[i]
+#endif      
+
+            | _ ->
+                use e = source.GetEnumerator()
+                while e.MoveNext() do
+                    f e.Current;
 
         [<CompiledName("Get")>]
         let nth     i (source : seq<'T>) = 
             checkNonNull "source" source
-            use e = source.GetEnumerator()
-            IEnumerator.nth i e
+
+            match source with
+            | :? ('T[]) as src ->
+                // Raise ArgumentException for an out-of-bounds index, for consistency with the other cases.
+                if i >= src.Length then invalidArg "index" (SR.GetString(SR.notEnoughElements))
+                elif i < 0 then invalidArg "index" (SR.GetString(SR.inputMustBeNonNegative))
+                else src.[i]
+            | :? ('T list) as src ->
+                // List.nth src
+                src.[i]
+            | :? IList<'T> as src ->
+                // Raise ArgumentException for an out-of-bounds index, for consistency with the other cases.
+                if i >= src.Count then invalidArg "index" (SR.GetString(SR.notEnoughElements))
+                elif i < 0 then invalidArg "index" (SR.GetString(SR.inputMustBeNonNegative))
+                else src.[i]
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                // Raise ArgumentException for an out-of-bounds index, for consistency with the other cases.
+                if i >= src.Count then invalidArg "index" (SR.GetString(SR.notEnoughElements))
+                elif i < 0 then invalidArg "index" (SR.GetString(SR.inputMustBeNonNegative))
+                else src.[i]
+#endif
+
+            | _ ->
+                use e = source.GetEnumerator()
+                IEnumerator.nth i e
 
         [<CompiledName("IterateIndexed")>]
         let iteri f (source : seq<'T>) = 
             checkNonNull "source" source
-            use e = source.GetEnumerator()
-            let mutable i = 0 
-            while e.MoveNext() do
-                f i e.Current;
-                i <- i + 1;
+
+            match source with
+            | :? ('T[]) as src ->
+                // Array.iteri f src
+                let f = OptimizedClosures.FSharpFunc<_,_,_>.Adapt(f)
+                for i = 0 to src.Length - 1 do
+                    f.Invoke (i, src.[i])
+            | :? ('T list) as src ->
+                List.iteri f src
+            | :? IList<'T> as src ->
+                let f = OptimizedClosures.FSharpFunc<_,_,_>.Adapt(f)
+                let count = src.Count
+                for i = 0 to count - 1 do
+                    f.Invoke (i, src.[i])
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                let f = OptimizedClosures.FSharpFunc<_,_,_>.Adapt(f)
+                let count = src.Count
+                for i = 0 to count - 1 do
+                    f.Invoke (i, src.[i])
+#endif
+
+            | _ ->
+                let f = OptimizedClosures.FSharpFunc<_,_,_>.Adapt(f)
+                use e = source.GetEnumerator()
+                let mutable i = 0 
+                while e.MoveNext() do
+                    f.Invoke (i, e.Current)
+                    i <- i + 1
 
         [<CompiledName("Exists")>]
         let exists f (source : seq<'T>) = 
             checkNonNull "source" source
-            use e = source.GetEnumerator()
-            let mutable state = false
-            while (not state && e.MoveNext()) do
-                state <- f e.Current
-            state
+
+            match source with
+            | :? ('T[]) as src ->
+                // Array.exists f src
+                let count = src.Length
+                let mutable index = 0
+                let mutable state = false
+                while not state && index < count do
+                    state <- f src.[index]
+                    index <- index + 1
+                state
+            | :? ('T list) as src ->
+                List.exists f src
+            | :? IList<'T> as src ->
+                let count = src.Count
+                let mutable index = 0
+                let mutable state = false
+                while not state && index < count do
+                    state <- f src.[index]
+                    index <- index + 1
+                state
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                let count = src.Count
+                let mutable index = 0
+                let mutable state = false
+                while not state && index < count do
+                    state <- f src.[index]
+                    index <- index + 1
+                state
+#endif
+
+            | _ ->
+                use e = source.GetEnumerator()
+                let mutable state = false
+                while (not state && e.MoveNext()) do
+                    state <- f e.Current
+                state
             
         [<CompiledName("ForAll")>]
         let forall f (source : seq<'T>) = 
             checkNonNull "source" source
-            use e = source.GetEnumerator()
-            let mutable state = true 
-            while (state && e.MoveNext()) do
-                state <- f e.Current
-            state
-            
+
+            match source with
+            | :? ('T[]) as src ->
+                // Array.forall f src
+                let count = src.Length
+                let mutable index = 0
+                let mutable state = true
+                while state && index < count do
+                    state <- f src.[index]
+                    index <- index + 1
+                state
+            | :? ('T list) as src ->
+                List.exists f src
+            | :? IList<'T> as src ->
+                let count = src.Count
+                let mutable index = 0
+                let mutable state = true
+                while state && index < count do
+                    state <- f src.[index]
+                    index <- index + 1
+                state
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                let count = src.Count
+                let mutable index = 0
+                let mutable state = true
+                while state && index < count do
+                    state <- f src.[index]
+                    index <- index + 1
+                state
+#endif
+
+            | _ ->
+                use e = source.GetEnumerator()
+                let mutable state = true 
+                while (state && e.MoveNext()) do
+                    state <- f e.Current
+                state
             
         [<CompiledName("Iterate2")>]
-        let iter2 f (source1 : seq<_>) (source2 : seq<_>)    = 
+        let iter2 f (source1 : seq<_>) (source2 : seq<_>) = 
             checkNonNull "source1" source1
             checkNonNull "source2" source2
-            use e1 = source1.GetEnumerator()
-            use e2 = source2.GetEnumerator()
-            while (e1.MoveNext() && e2.MoveNext()) do
-                f e1.Current e2.Current;
+
+            let f = OptimizedClosures.FSharpFunc<_,_,_>.Adapt(f)
+            match source1, source2 with
+            | (:? ('T1[]) as src1), (:? ('T2[]) as src2) ->
+                let len = Operators.min src1.Length src2.Length
+                for i = 0 to len - 1 do
+                    f.Invoke (src1.[i], src2.[i])
+                
+            | (:? ('T1 list) as src1), (:? ('T2 list) as src2) ->
+                let mutable src1 = src1
+                let mutable src2 = src2
+                while not src1.IsEmpty && not src2.IsEmpty do
+                    f.Invoke (src1.Head, src2.Head)
+                    src1 <- src1.Tail
+                    src2 <- src2.Tail
+
+            | (:? IList<'T1> as src1), (:? IList<'T2> as src2) ->
+                let len = Operators.min src1.Count src2.Count
+                for i = 0 to len - 1 do
+                    f.Invoke (src1.[i], src2.[i])
+
+#if FX_ATLEAST_45
+            | (:? IReadOnlyList<'T1> as src1), (:? IReadOnlyList<'T2> as src2) ->
+                let len = Operators.min src1.Count src2.Count
+                for i = 0 to len - 1 do
+                    f.Invoke (src1.[i], src2.[i])
+#endif
+
+            | _, _ ->
+                use e1 = source1.GetEnumerator()
+                use e2 = source2.GetEnumerator()
+                while (e1.MoveNext() && e2.MoveNext()) do
+                    f.Invoke (e1.Current, e2.Current)
 
 
         // Build an IEnumerble by wrapping/transforming iterators as they get generated.
         let revamp f (ie : seq<_>) = mkSeq (fun () -> f (ie.GetEnumerator()))
-        let revamp2 f (ie1 : seq<_>) (source2 : seq<_>) = 
-            mkSeq (fun () -> f (ie1.GetEnumerator()) (source2.GetEnumerator()))
+        let revamp2 f (ie1 : seq<_>) (ie2 : seq<_>) = 
+            mkSeq (fun () -> f (ie1.GetEnumerator()) (ie2.GetEnumerator()))
+        let revamp3 f (ie1 : seq<_>) (ie2 : seq<_>) (ie3 : seq<_>) = 
+            mkSeq (fun () -> f (ie1.GetEnumerator()) (ie2.GetEnumerator()) (ie3.GetEnumerator()))
 
         [<CompiledName("Filter")>]
         let filter f source      = 
@@ -921,7 +1111,7 @@ namespace Microsoft.FSharp.Collections
             revamp  (IEnumerator.filter f) source
 
         [<CompiledName("Where")>]
-        let where f source      = filter f source
+        let where f source = filter f source
 
         [<CompiledName("Map")>]
         let map    f source      = 
@@ -955,21 +1145,74 @@ namespace Microsoft.FSharp.Collections
             checkNonNull "source1" source1
             checkNonNull "source2" source2
             checkNonNull "source3" source3
-            map2 (fun x (y,z) -> x,y,z) source1 (zip source2 source3)
+            //map3 (fun x y z -> x, y, z) source1 source2 source3
+            revamp3 (IEnumerator.map3 (fun x y z -> x, y, z)) source1 source2 source3
 
         [<CompiledName("Cast")>]
-        let cast (source: IEnumerable) = 
+        let cast (source: IEnumerable) : IEnumerable<'T> =
             checkNonNull "source" source
-            mkSeq (fun () -> IEnumerator.cast (source.GetEnumerator()))
+            
+            match source with
+            | :? IEnumerable<'T> as src -> src
+            | _ ->
+                mkSeq (fun () -> IEnumerator.cast (source.GetEnumerator()))
 
         [<CompiledName("TryPick")>]
         let tryPick f (source : seq<'T>)  = 
             checkNonNull "source" source
-            use e = source.GetEnumerator()
-            let mutable res = None 
-            while (Option.isNone res && e.MoveNext()) do
-                res <-  f e.Current;
-            res
+
+            let mutable res = None
+            match source with
+            | :? ('T[]) as src ->
+                // Array.tryPick f src
+                let len = src.Length
+                let mutable index = 0
+                while Option.isNone res && index < len do
+                    match f src.[index] with
+                    | None -> ()
+                    | Some _ as x ->
+                        res <- x
+                    index <- index + 1
+                res
+            | :? ('T list) as src ->
+                // List.tryPick f src
+                let mutable src = src
+                while Option.isNone res && not src.IsEmpty do
+                    match f src.Head with
+                    | None -> ()
+                    | Some _ as x ->
+                        res <- x
+                    src <- src.Tail
+                res
+            | :? IList<'T> as src ->
+                let len = src.Count
+                let mutable index = 0
+                while Option.isNone res && index < len do
+                    match f src.[index] with
+                    | None -> ()
+                    | Some _ as x ->
+                        res <- x
+                    index <- index + 1
+                res
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                let len = src.Count
+                let mutable index = 0
+                while Option.isNone res && index < len do
+                    match f src.[index] with
+                    | None -> ()
+                    | Some _ as x ->
+                        res <- x
+                    index <- index + 1
+                res
+#endif
+
+            | _ ->
+                use e = source.GetEnumerator()
+                while (Option.isNone res && e.MoveNext()) do
+                    res <-  f e.Current;
+                res
 
         [<CompiledName("Pick")>]
         let pick f source  = 
@@ -981,12 +1224,52 @@ namespace Microsoft.FSharp.Collections
         [<CompiledName("TryFind")>]
         let tryFind f (source : seq<'T>)  = 
             checkNonNull "source" source
-            use e = source.GetEnumerator()
-            let mutable res = None 
-            while (Option.isNone res && e.MoveNext()) do
-                let c = e.Current 
-                if f c then res <- Some(c)
-            res
+
+            let mutable res = None
+            match source with
+            | :? ('T[]) as src ->
+                // Array.tryFind f src
+                let len = src.Length
+                let mutable index = 0
+                while Option.isNone res && index < len do
+                    if f src.[index] then
+                        res <- Some src.[index]
+                    index <- index + 1
+                res
+            | :? ('T list) as src ->
+                // List.tryFind f src
+                let mutable src = src
+                while Option.isNone res && not src.IsEmpty do
+                    if f src.Head then
+                        res <- Some src.Head
+                    src <- src.Tail
+                res
+            | :? IList<'T> as src ->
+                let len = src.Count
+                let mutable index = 0
+                while Option.isNone res && index < len do
+                    if f src.[index] then
+                        res <- Some src.[index]
+                    index <- index + 1
+                res
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                let len = src.Count
+                let mutable index = 0
+                while Option.isNone res && index < len do
+                    if f src.[index] then
+                        res <- Some src.[index]
+                    index <- index + 1
+                res
+#endif
+
+            | _ ->
+                use e = source.GetEnumerator()
+                while (Option.isNone res && e.MoveNext()) do
+                    let c = e.Current 
+                    if f c then res <- Some(c)
+                res
 
         [<CompiledName("Find")>]
         let find f source = 
@@ -996,7 +1279,7 @@ namespace Microsoft.FSharp.Collections
             | Some x -> x
 
         [<CompiledName("Take")>]
-        let take count (source : seq<'T>)    = 
+        let take count (source : seq<'T>) =
             checkNonNull "source" source
             if count < 0 then invalidArg "count" (SR.GetString(SR.inputMustBeNonNegative))
             (* Note: don't create or dispose any IEnumerable if n = 0 *)
@@ -1012,12 +1295,15 @@ namespace Microsoft.FSharp.Collections
             checkNonNull "source" source
             match source with 
             | :? ('T[]) as a -> a.Length = 0
-            | :? list<'T> as a -> a.IsEmpty
+            | :? ('T list) as a -> a.IsEmpty
+//            | :? Set<'T> as a -> a.IsEmpty
             | :? ICollection<'T> as a -> a.Count = 0
+#if FX_ATLEAST_45
+            | :? IReadOnlyCollection<'T> as a -> a.Count = 0
+#endif
             | _ -> 
                 use ie = source.GetEnumerator()
                 not (ie.MoveNext())
-
 
         [<CompiledName("Concat")>]
         let concat sources = 
@@ -1025,12 +1311,16 @@ namespace Microsoft.FSharp.Collections
             mkConcatSeq sources
 
         [<CompiledName("Length")>]
-        let length (source : seq<'T>)    = 
+        let length (source : seq<'T>) = 
             checkNonNull "source" source
             match source with 
             | :? ('T[]) as a -> a.Length
             | :? ('T list) as a -> a.Length
+//            | :? Set<'T> as a -> a.Count
             | :? ICollection<'T> as a -> a.Count
+#if FX_ATLEAST_45
+            | :? IReadOnlyCollection<'T> as a -> a.Count
+#endif
             | _ -> 
                 use e = source.GetEnumerator() 
                 let mutable state = 0 
@@ -1041,21 +1331,108 @@ namespace Microsoft.FSharp.Collections
         [<CompiledName("Fold")>]
         let fold<'T,'State> f (x:'State) (source : seq<'T>)  = 
             checkNonNull "source" source
-            use e = source.GetEnumerator() 
-            let mutable state = x 
-            while e.MoveNext() do
-                state <- f state  e.Current;
-            state
+
+            let f = OptimizedClosures.FSharpFunc<_,_,_>.Adapt(f)
+            match source with
+            | :? ('T[]) as src ->
+                // Array.fold f x src
+                let len = src.Length
+                let mutable state = x
+                for i = 0 to len - 1 do
+                    state <- f.Invoke (state, src.[i])
+                state
+
+            | :? ('T list) as src ->
+                // List.fold f x src
+                let mutable src = src
+                let mutable state = x
+                while not src.IsEmpty do
+                    state <- f.Invoke (state, src.Head)
+                    src <- src.Tail
+                state
+
+            | :? IList<'T> as src ->
+                let len = src.Count
+                let mutable state = x
+                for i = 0 to len - 1 do
+                    state <- f.Invoke (state, src.[i])
+                state
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                let len = src.Count
+                let mutable state = x
+                for i = 0 to len - 1 do
+                    state <- f.Invoke (state, src.[i])
+                state
+#endif
+
+            | _ ->
+                use e = source.GetEnumerator() 
+                let mutable state = x 
+                while e.MoveNext() do
+                    state <- f.Invoke (state, e.Current)
+                state
 
         [<CompiledName("Reduce")>]
         let reduce f (source : seq<'T>)  = 
             checkNonNull "source" source
-            use e = source.GetEnumerator() 
-            if not (e.MoveNext()) then invalidArg "source" InputSequenceEmptyString;
-            let mutable state = e.Current 
-            while e.MoveNext() do
-                state <- f state  e.Current;
-            state
+
+            let f = OptimizedClosures.FSharpFunc<_,_,_>.Adapt(f)
+            match source with
+            | :? ('T[]) as src ->
+                // Array.reduce f src
+                match src.Length with
+                | 0 ->
+                    invalidArg "source" InputSequenceEmptyString
+                | len ->
+                    let mutable state = src.[0]
+                    for i = 1 to len - 1 do
+                        state <- f.Invoke (state, src.[i])
+                    state
+                
+            | :? ('T list) as src ->
+                // List.reduce f src
+                match src with
+                | [] ->
+                    invalidArg "source" InputSequenceEmptyString
+                | _ ->
+                    let mutable state = src.Head
+                    let mutable src = src.Tail
+                    while not src.IsEmpty do
+                        state <- f.Invoke (state, src.Head)
+                        src <- src.Tail
+                    state
+
+            | :? IList<'T> as src ->
+                match src.Count with
+                | 0 ->
+                    invalidArg "source" InputSequenceEmptyString
+                | len ->
+                    let mutable state = src.[0]
+                    for i = 1 to len - 1 do
+                        state <- f.Invoke (state, src.[i])
+                    state
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                match src.Count with
+                | 0 ->
+                    invalidArg "source" InputSequenceEmptyString
+                | len ->
+                    let mutable state = src.[0]
+                    for i = 1 to len - 1 do
+                        state <- f.Invoke (state, src.[i])
+                    state
+#endif
+
+            | _ ->
+                use e = source.GetEnumerator() 
+                if not (e.MoveNext()) then invalidArg "source" InputSequenceEmptyString;
+                let mutable state = e.Current
+                while e.MoveNext() do
+                    state <- f.Invoke (state, e.Current)
+                state
 
         let fromGenerator f = mkSeq(fun () -> Generator.EnumerateFromGenerator (f()))
         let toGenerator (ie : seq<_>) = Generator.GenerateFromEnumerator (ie.GetEnumerator())
@@ -1075,19 +1452,24 @@ namespace Microsoft.FSharp.Collections
         let compareWith (f:'T -> 'T -> int) (source1 : seq<'T>) (source2: seq<'T>) = 
             checkNonNull "source1" source1
             checkNonNull "source2" source2
-            use e1 = source1.GetEnumerator()
-            use e2 = source2.GetEnumerator()
-            let rec go () = 
-                let e1ok = e1.MoveNext() 
-                let e2ok = e2.MoveNext() 
-                let c = (if e1ok = e2ok then 0 else if e1ok then 1 else -1) 
-                if c <> 0 then c else
-                if not e1ok || not e2ok then 0 
-                else
-                    let c = f e1.Current e2.Current 
+
+            match source1, source2 with
+            (* TODO :   Implement cases for 'T[], 'T list, IList<T> and IReadOnlyList<T>. *)
+
+            | _, _ ->
+                use e1 = source1.GetEnumerator()
+                use e2 = source2.GetEnumerator()
+                let rec go () = 
+                    let e1ok = e1.MoveNext() 
+                    let e2ok = e2.MoveNext() 
+                    let c = (if e1ok = e2ok then 0 else if e1ok then 1 else -1) 
                     if c <> 0 then c else
-                    go () 
-            go()
+                    if not e1ok || not e2ok then 0 
+                    else
+                        let c = f e1.Current e2.Current 
+                        if c <> 0 then c else
+                        go () 
+                go()
 
         [<CompiledName("OfList")>]
         let ofList (source : 'T list) = 
@@ -1096,9 +1478,14 @@ namespace Microsoft.FSharp.Collections
         [<CompiledName("ToList")>]
         let toList (source : seq<'T>) = 
             checkNonNull "source" source
+
             match source with 
             | :? ('T list) as res -> res
             | :? ('T[]) as res -> List.ofArray res
+//            | :? Set<'T> as res -> Set.toList res
+
+            (* TODO :   Implement cases for IList<T> and IReadOnlyList<T>. *)
+
             | _ -> 
                 use e = source.GetEnumerator()
                 let mutable res = [] 
@@ -1108,18 +1495,81 @@ namespace Microsoft.FSharp.Collections
 
         // Create a new object to ensure underlying array may not be mutated by a backdoor cast 
         [<CompiledName("OfArray")>]
-        let ofArray (source : 'T array) = 
+        let ofArray (source : 'T[]) = 
             checkNonNull "source" source
-            mkSeq (fun () -> IEnumerator.ofArray source)        
+
+            // REVIEW : Would it be more efficient to use System.Collections.ObjectModel.ReadOnlyCollection<T> here?
+            mkSeq (fun () -> IEnumerator.ofArray source)
             
         [<CompiledName("ToArray")>]
         let toArray (source : seq<'T>)  = 
             checkNonNull "source" source
             match source with 
-            | :? ('T[]) as res -> (res.Clone() :?> 'T[])
-            | :? ('T list) as res -> List.toArray res
-            //| :? ICollection<'T> as res -> ...
-            | _ -> 
+            | :? ('T[]) as res ->
+                if res.Length = 0 then [||] //Array.empty
+                else (res.Clone() :?> 'T[])
+            | :? ('T list) as res ->
+                if res.IsEmpty then [||] //Array.empty
+                else List.toArray res
+            | :? IList<'T> as res ->
+                match res.Count with
+                | 0 -> [||] //Array.empty
+                | count ->
+                    // The count should never be negative, but just in case...
+                    if count < 0 then invalidArg "count" (SR.GetString(SR.inputMustBeNonNegative))
+                    else
+                        let arr = Array.zeroCreateUnchecked count
+                        for i = 0 to count - 1 do
+                            arr.[i] <- res.[i]
+                        arr
+            | :? ICollection<'T> as res ->
+                match res.Count with
+                | 0 -> [||] //Array.empty
+                | count ->
+                    // The count should never be negative, but just in case...
+                    if count < 0 then invalidArg "count" (SR.GetString(SR.inputMustBeNonNegative))
+                    else
+                        let arr = Array.zeroCreateUnchecked count
+
+                        let mutable index = 0
+                        use e = source.GetEnumerator()
+                        while e.MoveNext () do
+                            arr.[index] <- e.Current
+                            index <- index + 1
+                        arr
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as res ->
+                match res.Count with
+                | 0 -> [||] //Array.empty
+                | count ->
+                    // The count should never be negative, but just in case...
+                    if count < 0 then invalidArg "count" (SR.GetString(SR.inputMustBeNonNegative))
+                    else
+                        let arr = Array.zeroCreateUnchecked count
+                        for i = 0 to count - 1 do
+                            arr.[i] <- res.[i]
+                        arr
+            | :? IReadOnlyCollection<'T> as res ->
+                match res.Count with
+                | 0 -> [||] //Array.empty
+                | count ->
+                    // The count should never be negative, but just in case...
+                    if count < 0 then invalidArg "count" (SR.GetString(SR.inputMustBeNonNegative))
+                    else
+                        let arr = Array.zeroCreateUnchecked count
+
+                        let mutable index = 0
+                        use e = source.GetEnumerator()
+                        while e.MoveNext () do
+                            arr.[index] <- e.Current
+                            index <- index + 1
+                        arr
+#endif
+
+            | _ ->
+                // NOTE : It is faster to use the default constructor of ResizeArray here,
+                // because the constructor which takes IEnumerable<T> *always* resizes at least once.
                 use e = source.GetEnumerator()
                 let res = new ResizeArray<_>()
                 while e.MoveNext() do
@@ -1134,60 +1584,111 @@ namespace Microsoft.FSharp.Collections
         [<CompiledName("Truncate")>]
         let truncate n (source: seq<'T>) =
             checkNonNull "source" source
-            seq { let i = ref 0
-                  use ie = source.GetEnumerator() 
-                  while !i < n && ie.MoveNext() do
-                     i := !i + 1
-                     yield ie.Current }
+
+            match source with
+            (* TODO :   Implement cases for 'T[], 'T list, IList<T> and IReadOnlyList<T>. *)
+
+            | _ ->
+                seq { let i = ref 0
+                      use ie = source.GetEnumerator() 
+                      while !i < n && ie.MoveNext() do
+                         i := !i + 1
+                         yield ie.Current }
 
         [<CompiledName("Pairwise")>]
         let pairwise (source: seq<'T>) =
             checkNonNull "source" source
-            seq { use ie = source.GetEnumerator() 
-                  if ie.MoveNext() then
-                      let iref = ref ie.Current
-                      while ie.MoveNext() do
-                          let j = ie.Current 
-                          yield (!iref, j)
-                          iref := j }
+
+            match source with
+            (* TODO :   Implement cases for 'T[], 'T list, IList<T> and IReadOnlyList<T>. *)
+
+            | _ ->
+                seq { use ie = source.GetEnumerator() 
+                      if ie.MoveNext() then
+                          let iref = ref ie.Current
+                          while ie.MoveNext() do
+                              let j = ie.Current 
+                              yield (!iref, j)
+                              iref := j }
 
         [<CompiledName("Scan")>]
         let scan<'T,'State> f (z:'State) (source : seq<'T>) = 
             checkNonNull "source" source
-            seq { let zref = ref z
-                  yield !zref
-                  use ie = source.GetEnumerator() 
-                  while ie.MoveNext() do
-                      zref := f !zref ie.Current 
-                      yield !zref }
 
-        [<CompiledName("FindIndex")>]
-        let findIndex p (source:seq<_>) = 
-            checkNonNull "source" source
-            use ie = source.GetEnumerator() 
-            let rec loop i = 
-                if ie.MoveNext() then 
-                    if p ie.Current then
-                        i
-                    else loop (i+1)
-                else
-                    raise (System.Collections.Generic.KeyNotFoundException(SR.GetString(SR.keyNotFoundAlt))) 
-            loop 0
+            match source with
+            (* TODO :   Implement cases for 'T[], 'T list, IList<T> and IReadOnlyList<T>. *)
+
+            | _ ->
+                seq { let zref = ref z
+                      yield !zref
+                      use ie = source.GetEnumerator() 
+                      while ie.MoveNext() do
+                          zref := f !zref ie.Current 
+                          yield !zref }
 
         [<CompiledName("TryFindIndex")>]
         let tryFindIndex p (source:seq<_>) = 
             checkNonNull "source" source
-            use ie = source.GetEnumerator() 
-            let rec loop i = 
-                if ie.MoveNext() then 
-                    if p ie.Current then
-                        Some i
-                    else loop (i+1)
-                else
-                    None
-            loop 0
 
-        
+            let mutable res = None
+            match source with
+            | :? ('T[]) as src ->
+                // Array.tryFindIndex p src
+                let len = src.Length
+                let mutable index = 0
+                while Option.isNone res && index < len do
+                    if p src.[index] then
+                        res <- Some index
+                    index <- index + 1
+                res
+            | :? ('T list) as src ->
+                // List.tryFindIndex p src
+                let mutable src = src
+                let mutable index = 0
+                while Option.isNone res && not src.IsEmpty do
+                    if p src.Head then
+                        res <- Some index
+                    src <- src.Tail
+                    index <- index + 1
+                res
+            | :? IList<'T> as src ->
+                let len = src.Count
+                let mutable index = 0
+                while Option.isNone res && index < len do
+                    if p src.[index] then
+                        res <- Some index
+                    index <- index + 1
+                res
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                let len = src.Count
+                let mutable index = 0
+                while Option.isNone res && index < len do
+                    if p src.[index] then
+                        res <- Some index
+                    index <- index + 1
+                res
+#endif
+
+            | _ ->
+                use ie = source.GetEnumerator() 
+                let rec loop i = 
+                    if ie.MoveNext() then 
+                        if p ie.Current then
+                            Some i
+                        else loop (i+1)
+                    else
+                        None
+                loop 0
+
+        [<CompiledName("FindIndex")>]
+        let findIndex p (source:seq<_>) = 
+            checkNonNull "source" source
+
+            match tryFindIndex p source with
+            | None -> raise (System.Collections.Generic.KeyNotFoundException(SR.GetString(SR.keyNotFoundAlt)))  
+            | Some x -> x
 
         // windowed : int -> seq<'T> -> seq<'T[]>
         [<CompiledName("Windowed")>]
@@ -1266,7 +1767,13 @@ namespace Microsoft.FSharp.Collections
         [<CompiledName("ReadOnly")>]
         let readonly (source:seq<_>) = 
             checkNonNull "source" source
-            mkSeq (fun () -> source.GetEnumerator())
+
+            match source with
+            (* OPTIMIZE :   If this is already a read-only seq<_> of some kind, or a 'T list or Set<'T>, return the source itself.
+                            If it's an array or IList<_>, wrap it in ReadOnlyCollection and return (arrays must be cloned first). *)
+            
+            | _ ->
+                mkSeq (fun () -> source.GetEnumerator())
 
 
 
@@ -1275,7 +1782,7 @@ namespace Microsoft.FSharp.Collections
 
             mkDelayedSeq (fun () -> 
                 // Wrap a StructBox(_) around all keys in case the key type is itself a type using null as a representation
-                let dict = new Dictionary<StructBox<'Key>,ResizeArray<'T>>(StructBox<'Key>.Comparer)
+                let dict = Dictionary<StructBox<'Key>,ResizeArray<'T>>(StructBox<'Key>.Comparer)
 
                 // Build the groupings
                 seq |> iter (fun v -> 
@@ -1310,8 +1817,8 @@ namespace Microsoft.FSharp.Collections
         let distinctBy keyf source =
             checkNonNull "source" source
             seq { // Wrap a StructBox(_) aroud all keys in case the key type is itself a type using null as a representation
-                  let dict = new Dictionary<StructBox<'Key>,obj>(StructBox<'Key>.Comparer)
-                  for v in source do
+                    let dict = new Dictionary<StructBox<'Key>,obj>(StructBox<'Key>.Comparer)
+                    for v in source do
                     let key = StructBox (keyf v)
                     if not (dict.ContainsKey(key)) then 
                         dict.[key] <- null; 
@@ -1320,7 +1827,7 @@ namespace Microsoft.FSharp.Collections
         [<CompiledName("SortBy")>]
         let sortBy keyf source =
             checkNonNull "source" source
-            mkDelayedSeq (fun () -> 
+            mkDelayedSeq (fun () ->
                 let array = source |> toArray 
                 Array.stableSortInPlaceBy keyf array
                 array :> seq<_>)
@@ -1349,8 +1856,12 @@ namespace Microsoft.FSharp.Collections
 
                 dict |> map (fun group -> (group.Key.Value, group.Value)))
 
+        (* OPTIMIZE :   For the inlined aggregate functions below --
+                        If we match on the input type to allow the use of a more-efficient function,
+                        will that type-match be "solved" at compile-time? Or will there still be a run-time cost? *)
+
         [<CompiledName("Sum")>]
-        let inline sum (source: seq< (^a) >) : ^a = 
+        let inline sum (source: seq< (^a) >) : ^a =
             use e = source.GetEnumerator() 
             let mutable acc = LanguagePrimitives.GenericZero< (^a) >
             while e.MoveNext() do
@@ -1358,7 +1869,7 @@ namespace Microsoft.FSharp.Collections
             acc
 
         [<CompiledName("SumBy")>]
-        let inline sumBy (f : 'T -> ^U) (source: seq<'T>) : ^U = 
+        let inline sumBy (f : 'T -> ^U) (source: seq<'T>) : ^U =
             use e = source.GetEnumerator() 
             let mutable acc = LanguagePrimitives.GenericZero< (^U) >
             while e.MoveNext() do
@@ -1517,56 +2028,238 @@ namespace Microsoft.FSharp.Collections
 
 
         [<CompiledName("ForAll2")>]
-        let forall2 p (source1: seq<_>) (source2: seq<_>) = 
+        let forall2 p (source1: seq<'T1>) (source2: seq<'T2>) = 
             checkNonNull "source1" source1
             checkNonNull "source2" source2
-            use e1 = source1.GetEnumerator()
-            use e2 = source2.GetEnumerator()
-            let mutable ok = true
-            while (ok && e1.MoveNext() && e2.MoveNext()) do
-                ok <- p e1.Current e2.Current;
-            ok
+
+            match source1, source2 with
+            | (:? ('T1[]) as src1), (:? ('T2[]) as src2) ->
+                let len = Operators.min src1.Length src2.Length
+                let mutable ok = true
+                let mutable index = 0
+                while ok && index < len do
+                    ok <- p src1.[index] src2.[index]
+                    index <- index + 1
+                ok
+            | (:? ('T1 list) as src1), (:? ('T2 list) as src2) ->
+                let mutable src1 = src1
+                let mutable src2 = src2
+                let mutable ok = true
+                while ok && not src1.IsEmpty && src2.IsEmpty do
+                    ok <- p src1.Head src2.Head
+                    src1 <- src1.Tail
+                    src2 <- src2.Tail
+                ok
+            | (:? IList<'T1> as src1), (:? IList<'T2> as src2) ->
+                let len = Operators.min src1.Count src2.Count
+                let mutable ok = true
+                let mutable index = 0
+                while ok && index < len do
+                    ok <- p src1.[index] src2.[index]
+                    index <- index + 1
+                ok
+
+#if FX_ATLEAST_45
+            | (:? IReadOnlyList<'T1> as src1), (:? IReadOnlyList<'T2> as src2) ->
+                let len = Operators.min src1.Count src2.Count
+                let mutable ok = true
+                let mutable index = 0
+                while ok && index < len do
+                    ok <- p src1.[index] src2.[index]
+                    index <- index + 1
+                ok
+#endif
+
+            | _, _ ->
+                use e1 = source1.GetEnumerator()
+                use e2 = source2.GetEnumerator()
+                let mutable ok = true
+                while (ok && e1.MoveNext() && e2.MoveNext()) do
+                    ok <- p e1.Current e2.Current;
+                ok
 
         
         [<CompiledName("Exists2")>]
-        let exists2 p (source1: seq<_>) (source2: seq<_>) = 
+        let exists2 p (source1: seq<'T1>) (source2: seq<'T2>) = 
             checkNonNull "source1" source1
             checkNonNull "source2" source2
-            use e1 = source1.GetEnumerator()
-            use e2 = source2.GetEnumerator()
-            let mutable ok = false
-            while (not ok && e1.MoveNext() && e2.MoveNext()) do
-                ok <- p e1.Current e2.Current;
-            ok
+
+            match source1, source2 with
+            | (:? ('T1[]) as src1), (:? ('T2[]) as src2) ->
+                let len = Operators.min src1.Length src2.Length
+                let mutable ok = false
+                let mutable index = 0
+                while not ok && index < len do
+                    ok <- p src1.[index] src2.[index]
+                    index <- index + 1
+                ok
+            | (:? ('T1 list) as src1), (:? ('T2 list) as src2) ->
+                let mutable src1 = src1
+                let mutable src2 = src2
+                let mutable ok = false
+                while not ok && not src1.IsEmpty && src2.IsEmpty do
+                    ok <- p src1.Head src2.Head
+                    src1 <- src1.Tail
+                    src2 <- src2.Tail
+                ok
+            | (:? IList<'T1> as src1), (:? IList<'T2> as src2) ->
+                let len = Operators.min src1.Count src2.Count
+                let mutable ok = false
+                let mutable index = 0
+                while not ok && index < len do
+                    ok <- p src1.[index] src2.[index]
+                    index <- index + 1
+                ok
+
+#if FX_ATLEAST_45
+            | (:? IReadOnlyList<'T1> as src1), (:? IReadOnlyList<'T2> as src2) ->
+                let len = Operators.min src1.Count src2.Count
+                let mutable ok = false
+                let mutable index = 0
+                while not ok && index < len do
+                    ok <- p src1.[index] src2.[index]
+                    index <- index + 1
+                ok
+#endif
+
+            | _, _ ->
+                use e1 = source1.GetEnumerator()
+                use e2 = source2.GetEnumerator()
+                let mutable ok = false
+                while (not ok && e1.MoveNext() && e2.MoveNext()) do
+                    ok <- p e1.Current e2.Current;
+                ok
 
         [<CompiledName("Head")>]
-        let head (source : seq<_>) =
+        let head (source : seq<'T>) =
             checkNonNull "source" source
-            use e = source.GetEnumerator() 
-            if (e.MoveNext()) then e.Current
-            else invalidArg "source" InputSequenceEmptyString
+
+            match source with
+            | :? ('T[]) as src ->
+                match src.Length with
+                | 0 ->
+                    invalidArg "source" InputSequenceEmptyString
+                | _ ->
+                    src.[0]
+            | :? ('T list) as src ->
+                match src with
+                | [] ->
+                    invalidArg "source" InputSequenceEmptyString
+                | hd :: _ -> hd
+            | :? IList<'T> as src ->
+                match src.Count with
+                | 0 ->
+                    invalidArg "source" InputSequenceEmptyString
+                | _ ->
+                    src.[0]
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                match src.Count with
+                | 0 ->
+                    invalidArg "source" InputSequenceEmptyString
+                | _ ->
+                    src.[0]
+#endif
+
+            | _ ->
+                use e = source.GetEnumerator() 
+                if (e.MoveNext()) then e.Current
+                else invalidArg "source" InputSequenceEmptyString
 
         [<CompiledName("Last")>]
-        let last (source : seq<_>) =
+        let last (source : seq<'T>) =
             checkNonNull "source" source
-            use e = source.GetEnumerator() 
-            if e.MoveNext() then 
-                let mutable res = e.Current
-                while (e.MoveNext()) do res <- e.Current
-                res
-            else
-                invalidArg "source" InputSequenceEmptyString
+
+            match source with
+            | :? ('T[]) as src ->
+                match src.Length with
+                | 0 ->
+                    invalidArg "source" InputSequenceEmptyString
+                | len ->
+                    src.[len - 1]
+            | :? ('T list) as src ->
+                match src with
+                | [] ->
+                    invalidArg "source" InputSequenceEmptyString
+                | _ ->
+                    let mutable src = src
+                    while not <| src.Tail.IsEmpty do
+                        src <- src.Tail
+                    src.Head
+            | :? IList<'T> as src ->
+                match src.Count with
+                | 0 ->
+                    invalidArg "source" InputSequenceEmptyString
+                | len ->
+                    src.[len - 1]
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                match src.Count with
+                | 0 ->
+                    invalidArg "source" InputSequenceEmptyString
+                | len ->
+                    src.[len - 1]
+#endif
+
+            | _ ->
+                use e = source.GetEnumerator() 
+                if e.MoveNext() then 
+                    let mutable res = e.Current
+                    while (e.MoveNext()) do res <- e.Current
+                    res
+                else
+                    invalidArg "source" InputSequenceEmptyString
 
 
         [<CompiledName("ExactlyOne")>]
-        let exactlyOne (source : seq<_>) =
+        let exactlyOne (source : seq<'T>) =
             checkNonNull "source" source
-            use e = source.GetEnumerator() 
-            if e.MoveNext() then 
-                let v = e.Current 
-                if e.MoveNext() then 
+
+            match source with
+            | :? ('T[]) as src ->
+                match src.Length with
+                | 0 ->
+                    invalidArg "source" InputSequenceEmptyString
+                | 1 ->
+                    src.[0]
+                | _ ->
                     invalidArg "source" (SR.GetString(SR.inputSequenceTooLong))
+            | :? ('T list) as src ->
+                match src with
+                | [] ->
+                    invalidArg "source" InputSequenceEmptyString
+                | [x] -> x
+                | _ ->
+                    invalidArg "source" (SR.GetString(SR.inputSequenceTooLong))
+            | :? IList<'T> as src ->
+                match src.Count with
+                | 0 ->
+                    invalidArg "source" InputSequenceEmptyString
+                | 1 ->
+                    src.[0]
+                | _ ->
+                    invalidArg "source" (SR.GetString(SR.inputSequenceTooLong))
+
+#if FX_ATLEAST_45
+            | :? IReadOnlyList<'T> as src ->
+                match src.Count with
+                | 0 ->
+                    invalidArg "source" InputSequenceEmptyString
+                | 1 ->
+                    src.[0]
+                | _ ->
+                    invalidArg "source" (SR.GetString(SR.inputSequenceTooLong))
+#endif
+
+            | _ ->
+                use e = source.GetEnumerator() 
+                if e.MoveNext() then 
+                    let v = e.Current 
+                    if e.MoveNext() then 
+                        invalidArg "source" (SR.GetString(SR.inputSequenceTooLong))
+                    else
+                        v
                 else
-                    v
-            else
-                invalidArg "source" InputSequenceEmptyString
+                    invalidArg "source" InputSequenceEmptyString
