@@ -26,8 +26,31 @@ namespace Microsoft.FSharp.Core
             if str = null then "" else str
 
         [<CompiledName("Concat")>]
-        let concat sep (strings : seq<string>) =  
-            System.String.Join(sep, Seq.toArray strings)
+        let concat (sep : string) (strings : seq<string>) =
+            let strs =
+                // Optimized conversion to string[] based on the actual type of the sequence.
+                match strings with
+                | :? (string[]) as arr -> arr
+                | _ -> Seq.toArray strings
+
+            // Optimized implementation based on the separator string
+            // and the number of strings to concatenate.
+            match strs.Length with
+            | 0 ->
+                System.String.Empty
+            | 1 ->
+                strs.[0]
+            | 2 ->
+                if sep.Length = 0 then
+                    System.String.Concat (strs.[0], strs.[1])
+                else
+                    let str0 = strs.[0]
+                    if str0.Length = 0 then strs.[1]
+                    elif strs.[1].Length = 0 then str0
+                    else
+                        System.String.Join (sep, strs)
+            | _ ->
+                System.String.Join (sep, strs)
 
         [<CompiledName("Iterate")>]
         let iter (f : (char -> unit)) (str:string) =
