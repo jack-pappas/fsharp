@@ -27,6 +27,11 @@ src/fsharp/FSharp.Compiler/*.resx
 src/fsharp/FSharp.Compiler/*.resources
 src/fsharp/FSharp.Compiler/*.sln
 src/fsharp/FSharp.Compiler/*.userprefs
+src/fsharp/FSharp.Compiler.Silverlight/lex.fs
+src/fsharp/FSharp.Compiler.Silverlight/pars.fs
+src/fsharp/FSharp.Compiler.Silverlight/pars.fsi
+src/fsharp/FSharp.Data.TypeProviders/FSData.resx
+src/fsharp/fsiAnyCpu/FSIstrings.resx
 Debug
 Proto
 .libs
