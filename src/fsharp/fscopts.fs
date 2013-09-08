@@ -808,11 +808,11 @@ let ReportTime (tcConfig:TcConfig) descr =
     if (tcConfig.showTimes || verbose) then 
         // Note that timing calls are relatively expensive on the startup path so we don't
         // make this call unless showTimes has been turned on.
-        let timeNow = System.Diagnostics.Process.GetCurrentProcess().UserProcessorTime.TotalSeconds
+        let process = System.Diagnostics.Process.GetCurrentProcess()
+        let timeNow = process.UserProcessorTime.TotalSeconds
         let maxGen = System.GC.MaxGeneration
         let gcNow = [| for i in 0 .. maxGen -> System.GC.CollectionCount(i) |]
-        let ptime = System.Diagnostics.Process.GetCurrentProcess()
-        let wsNow = ptime.WorkingSet/1000000
+        let wsNow = process.WorkingSet/1000000
 
         match !tPrev, !nPrev with
         | Some (timePrev,gcPrev:int []),Some prevDescr ->
