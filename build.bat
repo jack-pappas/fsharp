@@ -7,15 +7,15 @@ if %PROCESSOR_ARCHITECTURE%==x86 (
 )
 
 ::Clean
-rm -rf lib/proto
-rm -rf lib/release
+rmdir /S /Q lib/proto
+rmdir /S /Q lib/release
 
 ::Build
 pushd .
 cd ./src
 set ABS_PATH=%CD%
 %MSBUILD% %ABS_PATH%/fsharp-proto-build.proj /p:TargetFramework=net40 
-mv "../lib/release" "../lib/proto"
+robocopy "../lib/release" "../lib/proto"
 
 %MSBUILD% %ABS_PATH%/fsharp-library-build.proj /p:TargetFramework=net40 /p:Configuration=Release
 %MSBUILD% %ABS_PATH%/fsharp-compiler-build.proj /p:TargetFramework=net40 /p:Configuration=Release
