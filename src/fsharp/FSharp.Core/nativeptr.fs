@@ -25,7 +25,17 @@ open System.Runtime.InteropServices
 [<RequireQualifiedAccess>]
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module NativePtr = 
+    [<GeneralizableValue>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("Zero")>]
+    let inline zero<'T when 'T : unmanaged> : nativeptr<'T> =
+       (# "ldnull" : nativeptr<'T> #)
 
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("IsNull")>]
+    let inline isNull<'T when 'T : unmanaged> (ptr : nativeptr<'T>) =
+        (# "ceq" zero<'T> ptr : bool #)
 
     [<NoDynamicInvocation>]
     [<CompiledName("OfNativeIntInlined")>]
@@ -58,4 +68,106 @@ module NativePtr =
     [<NoDynamicInvocation>]
     [<CompiledName("StackAllocate")>]
     let inline stackalloc (count:int) : nativeptr<'T> = (# "localloc" (count * sizeof<'T>) : nativeptr<'T> #)
+(*
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("ClearPointerInlined")>]
+    let inline clear (p : nativeptr<'T>) =
+        (# "initobj !0" type ('T) p #)
+
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("CopyPointerInlined")>]
+    let inline copy (destPtr : nativeptr<'T>) (srcPtr : nativeptr<'T>) =
+        (# "cpobj !0" type ('T) destPtr srcPtr #)
+
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("CopyBlockInlined")>]
+    let inline memcpy (destPtr : nativeptr<'T>) (srcPtr : nativeptr<'T>) (count : int) =
+        (# "cpblk" destPtr srcPtr (count * sizeof<'T>) #)
+*)
+
+
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module ManagedPtr =
+    [<GeneralizableValue>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("Zero")>]
+    let inline zero<'T> : ilsigptr<'T> =
+       (# "ldnull" : ilsigptr<'T> #)
+
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("IsNull")>]
+    let inline isNull (ptr : ilsigptr<'T>) =
+        (# "ceq" zero<'T> ptr : bool #)
+
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("OfNativeIntInlined")>]
+    let inline ofNativeInt (x : nativeint) =
+        (# "" x : ilsigptr<'T> #)
+
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("ToNativeIntInlined")>]
+    let inline toNativeInt (x : ilsigptr<'T>) =
+        (# "" x : nativeint #)
+
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("AddPointerInlined")>]
+    let inline add (x : ilsigptr<'T>) (n : int) : ilsigptr<'T> =
+        toNativeInt x + nativeint n * (# "sizeof !0" type('T) : nativeint #) |> ofNativeInt
+
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("GetPointerInlined")>]
+    let inline get (p : ilsigptr<'T>) n =
+        (# "ldobj !0" type ('T) (add p n) : 'T #) 
+
+    [<Unverifiable>]    
+    [<NoDynamicInvocation>]
+    [<CompiledName("SetPointerInlined")>]
+    let inline set (p : ilsigptr<'T>) n (x : 'T) =
+        (# "stobj !0" type ('T) (add p n) x #)  
+
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("ReadPointerInlined")>]
+    let inline read (p : ilsigptr<'T>) =
+        (# "ldobj !0" type ('T) p : 'T #) 
+
+    [<Unverifiable>]    
+    [<NoDynamicInvocation>]
+    [<CompiledName("WritePointerInlined")>]
+    let inline write (p : ilsigptr<'T>) (x : 'T) =
+        (# "stobj !0" type ('T) p x #)  
+
+    [<Unverifiable>]    
+    [<NoDynamicInvocation>]
+    [<CompiledName("StackAllocate")>]
+    let inline stackalloc (count : int) : ilsigptr<'T> =
+        (# "localloc" (count * sizeof<'T>) : ilsigptr<'T> #)
+(*
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("ClearPointerInlined")>]
+    let inline clear (p : ilsigptr<'T>) =
+        (# "initobj !0" type ('T) p #)
+
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("CopyPointerInlined")>]
+    let inline copy (destPtr : ilsigptr<'T>) (srcPtr : ilsigptr<'T>) =
+        (# "cpobj !0" type ('T) destPtr srcPtr #)
+
+    [<Unverifiable>]
+    [<NoDynamicInvocation>]
+    [<CompiledName("CopyBlockInlined")>]
+    let inline memcpy (destPtr : ilsigptr<'T>) (srcPtr : ilsigptr<'T>) (count : int) =
+        (# "cpblk" destPtr srcPtr (count * sizeof<'T>) #)
+*)
 
